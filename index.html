@@ -26,6 +26,7 @@
             padding: 10px;
             background: #eee;
             border-radius: 6px;
+            line-height: 1.4;
         }
         textarea {
             width: 100%;
@@ -68,7 +69,7 @@
     <h2>Client-Side AI Test</h2>
     <p>This script downloads a tiny AI model into your browser cache and runs locally.</p>
     
-    <div id="status">Loading AI engine... please wait.</div>
+    <div id="status">Initializing execution engine...</div>
     
     <textarea id="prompt" disabled placeholder="Type a prompt here... (e.g., Write a haiku about coding)"></textarea>
     <button id="generate-btn" disabled>Generate Response</button>
@@ -78,8 +79,11 @@
 </div>
 
 <script type="module">
-    // Import Transformers.js directly from a CDN web module
-    import { pipeline } from 'https://jsdelivr.net';
+    // Import Transformers.js v3 from the official CDN web module
+    import { env, pipeline } from 'https://jsdelivr.net';
+
+    // Force the library to use standard WASM (CPU execution) for maximum mobile compatibility
+    env.allowLocalModels = false;
 
     const statusDiv = document.getElementById('status');
     const promptInput = document.getElementById('prompt');
@@ -90,28 +94,26 @@
 
     async function initAI() {
         try {
-            statusDiv.innerText = "Downloading model weights into your browser cache (approx. 150MB)...";
-            
-            // Initialize a text generation pipeline using a highly compressed model
+            statusDiv.innerText = "Connecting to repository models...";
+
+            // Initialize the pipeline strictly via CPU/WASM
             generator = await pipeline('text-generation', 'onnx-community/Qwen2.5-0.5B-Instruct', {
-                device: 'webgpu', // Fallbacks to 'wasm' (CPU) if WebGPU isn't available
+                device: 'wasm',
+                progress_callback: (data) => {
+                    if (data.status === 'progress') {
+                        statusDiv.innerText = `Downloading weights: ${data.file}\nProgress: ${Math.round(data.progress)}%`;
+                    } else if (data.status === 'ready') {
+                        statusDiv.innerText = "Finalizing compilation layer...";
+                    }
+                }
             });
 
-            statusDiv.innerText = "🚀 AI Engine Loaded & Ready! (Compute is 100% local)";
+            statusDiv.innerText = "🚀 AI Engine Ready! (Compute is 100% local)";
             promptInput.disabled = false;
             generateBtn.disabled = false;
         } catch (error) {
             console.error(error);
-            statusDiv.innerText = "Error loading WebGPU. Trying fallback execution...";
-            try {
-                // Fallback attempt with a slightly lighter pipeline constraint if WebGPU failed
-                generator = await pipeline('text-generation', 'onnx-community/Qwen2.5-0.5B-Instruct');
-                statusDiv.innerText = "🚀 AI Engine Ready (Running on WASM/CPU fallback)";
-                promptInput.disabled = false;
-                generateBtn.disabled = false;
-            } catch (fallbackError) {
-                statusDiv.innerText = "Failed to initialize model. View console for details.";
-            }
+            statusDiv.innerText = "Initialization failed: " + error.message;
         }
     }
 
@@ -123,9 +125,13 @@
         outputDiv.innerText = "Thinking...";
 
         try {
-            const result = await generator(text, { 
-                max_new_tokens: 100,
-                temperature: 0.7 
+            // Standard formatting prompt structure for instructions
+            const formattedPrompt = `<|im_start|>user\n${text}<|im_end|>\n<|im_start|>assistant\n`;
+            
+            const result = await generator(formattedPrompt, { 
+                max_new_tokens: 80,
+                temperature: 0.6,
+                return_full_text: false
             });
             
             outputDiv.innerText = result[0].generated_text;
@@ -136,10 +142,7 @@
         }
     }
 
-    // Bind event listener to the button
     generateBtn.addEventListener('click', generateText);
-
-    // Initialize the setup on page load
     initAI();
 </script>
 
